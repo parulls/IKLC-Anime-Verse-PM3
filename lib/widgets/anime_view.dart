@@ -4,7 +4,7 @@ import 'anime_card.dart';
 
 class AnimeView extends StatelessWidget {
   final List<Anime> animeList;
-
+  
   const AnimeView({
     super.key,
     required this.animeList,

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -42,11 +43,28 @@ class FavoriteAnimeCard extends StatelessWidget {
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(screenWidth * 0.04),
-                    child: Image.asset(
-                      imagePath,
+                    child: imagePath.isNotEmpty
+                        ? CachedNetworkImage(
+                      imageUrl: imagePath,
                       width: screenWidth * 0.2,
                       height: screenHeight * 0.12,
                       fit: BoxFit.cover,
+                      placeholder: (context, url) => Container(
+                        color: Colors.white.withValues(alpha: 0.1),
+                        child: const Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                      errorWidget: (context, url, error) => Container(
+                        color: Colors.white.withValues(alpha:0.1),
+                        child: const Icon(Icons.broken_image),
+                      ),
+                    )
+                        : Container(
+                      width: screenWidth * 0.2,
+                      height: screenHeight * 0.12,
+                      color: Colors.white.withValues(alpha: 0.1),
+                      child: const Icon(Icons.image_not_supported),
                     ),
                   ),
                   SizedBox(width: screenWidth * 0.04),

@@ -1,15 +1,34 @@
-import 'dart:convert';
+import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/anime.dart';
-import '../data/dummy_data.dart';
+import '../repositories/anime_repository.dart';
+import '../service/firestore_service.dart';
 
 /// Main app state provider managing favorites, filtering, and search
 /// This provider handles all anime-related state management
 class AppStateProvider extends ChangeNotifier {
+  final AnimeRepository _repository = AnimeRepository();
+  final FirestoreService _firestoreService = FirestoreService();
+
+  // API Data state
+  List<Anime> _animeList = [];
+  bool _isLoading = false;
+  bool _isLoadingMore = false;
+  String? _errorMessage;
+
+  // Pagination state
+  int _currentPage = 1;
+  bool _hasMore = true;
+
+  // Search mode state
+  bool _isSearchMode = false;
+
+  StreamSubscription<List<Anime>>? _favoritesSubscription;
+  StreamSubscription<User?>? _authSubscription;
+
   // Favorites state
   List<Anime> _favorites = [];
-  static const String _storageKey = 'favorite_anime_list';
 
   // Filtering state
   String _selectedGenre = "All";
@@ -17,95 +36,195 @@ class AppStateProvider extends ChangeNotifier {
   // Search state (separated by screen)
   String _homeSearchQuery = "";
   String _favoriteSearchQuery = "";
+  Timer? _searchDebounce;
 
   // Getters
+  List<Anime> get animeList => _animeList;
+  bool get isLoading => _isLoading;
+  bool get isLoadingMore => _isLoadingMore;
+  String? get errorMessage => _errorMessage;
+  bool get hasMore => _hasMore;
+  int get currentPage => _currentPage;
+  bool get isSearchMode => _isSearchMode;
   List<Anime> get favorites => _favorites;
   String get selectedGenre => _selectedGenre;
   String get homeSearchQuery => _homeSearchQuery;
   String get favoriteSearchQuery => _favoriteSearchQuery;
 
   AppStateProvider() {
-    _loadFavorites();
+    _initAuthListener();
+    fetchTopAnime();
   }
 
-  // ========== FAVORITES MANAGEMENT ==========
-
-  /// Load favorites from SharedPreferences
-  Future<void> _loadFavorites() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? favoritesJson = prefs.getString(_storageKey);
-
-      if (favoritesJson != null) {
-        final List<dynamic> decoded = json.decode(favoritesJson);
-        _favorites = decoded.map((item) {
-          return Anime(
-            id: item['id'],
-            title: item['title'],
-            imagePath: item['imagePath'],
-            genre: item['genre'],
-            rating: item['rating'],
-            totalEpisodes: item['totalEpisodes'],
-            description: item['description'],
-          );
-        }).toList();
-        notifyListeners();
+  void _initAuthListener() {
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user != null) {
+        debugPrint('✅ User authenticated, subscribing to favorites: ${user.uid}');
+        _subscribeToFavorites(user.uid);
+      } else {
+        debugPrint('❌ User logged out, unsubscribing from favorites');
+        _unsubscribeFromFavorites();
       }
-    } catch (e) {
-      debugPrint('Error loading favorites: $e');
-    }
+    });
   }
 
-  /// Save favorites to SharedPreferences
-  Future<void> _saveFavorites() async {
+  void _subscribeToFavorites(String userId) {
+    _favoritesSubscription?.cancel();
+    _favoritesSubscription =
+        _firestoreService.getFavoritesStream(userId).listen(
+              (favorites) {
+            debugPrint('📚 Favorites updated: ${favorites.length} items');
+            _favorites = favorites;
+            notifyListeners();
+          },
+          onError: (error) {
+            debugPrint('❌ Error loading favorites: $error');
+          },
+        );
+  }
+
+  void _unsubscribeFromFavorites() {
+    _favoritesSubscription?.cancel();
+    _favoritesSubscription = null;
+    _favorites = [];
+    notifyListeners();
+  }
+
+  // ========== API DATA MANAGEMENT ==========
+
+  /// Fetch top anime from API (reset list)
+  Future<void> fetchTopAnime({int page = 1}) async {
+    _isLoading = true;
+    _errorMessage = null;
+    _isSearchMode = false;
+    _currentPage = 1;
+    _hasMore = true;
+    notifyListeners();
+
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final List<Map<String, dynamic>> favoritesJson = _favorites.map((anime) {
-        return {
-          'id': anime.id,
-          'title': anime.title,
-          'imagePath': anime.imagePath,
-          'genre': anime.genre,
-          'rating': anime.rating,
-          'totalEpisodes': anime.totalEpisodes,
-          'description': anime.description,
-        };
-      }).toList();
-
-      await prefs.setString(_storageKey, json.encode(favoritesJson));
+      _animeList = await _repository.getTopAnime(page: page);
     } catch (e) {
-      debugPrint('Error saving favorites: $e');
-    }
-  }
-
-  /// Check if anime is in favorites
-  bool isFavorite(String animeId) {
-    return _favorites.any((anime) => anime.id == animeId);
-  }
-
-  /// Toggle favorite status
-  void toggleFavorite(Anime anime) {
-    if (isFavorite(anime.id)) {
-      removeFavorite(anime.id);
-    } else {
-      addFavorite(anime);
-    }
-  }
-
-  /// Add anime to favorites
-  void addFavorite(Anime anime) {
-    if (!isFavorite(anime.id)) {
-      _favorites.add(anime);
-      _saveFavorites();
+      _errorMessage = 'Failed to load anime: $e';
+      debugPrint('Error fetching anime: $e');
+    } finally {
+      _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Remove anime from favorites
-  void removeFavorite(String animeId) {
-    _favorites.removeWhere((anime) => anime.id == animeId);
-    _saveFavorites();
+  /// Load more anime (pagination)
+  Future<void> loadMoreAnime() async {
+    if (_isLoadingMore || !_hasMore || _isSearchMode || _isLoading) return;
+
+    _isLoadingMore = true;
     notifyListeners();
+
+    try {
+      _currentPage++;
+      final newAnime = await _repository.getTopAnime(page: _currentPage);
+
+      if (newAnime.isEmpty) {
+        _hasMore = false;
+        debugPrint('📄 No more anime to load (reached end)');
+      } else {
+        _animeList.addAll(newAnime);
+        debugPrint('📄 Loaded page $_currentPage: ${newAnime.length} anime');
+      }
+    } catch (e) {
+      _errorMessage = 'Failed to load more: $e';
+      debugPrint('Error loading more anime: $e');
+      _currentPage--;
+    } finally {
+      _isLoadingMore = false;
+      notifyListeners();
+    }
+  }
+
+  /// Search anime from API (server-side)
+  Future<void> searchAnimeFromAPI(String query) async {
+    if (query.trim().isEmpty) {
+      await fetchTopAnime();
+      return;
+    }
+
+    _isLoading = true;
+    _errorMessage = null;
+    _isSearchMode = true;
+    _hasMore = false;
+    notifyListeners();
+
+    try {
+      _animeList = await _repository.searchAnime(query);
+      debugPrint('🔍 Search results: ${_animeList.length} anime');
+    } catch (e) {
+      _errorMessage = 'Search failed: $e';
+      debugPrint('Error searching anime: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Get anime by ID
+  Future<Anime?> getAnimeById(int malId) async {
+    try {
+      return await _repository.getAnimeById(malId);
+    } catch (e) {
+      debugPrint('Error fetching anime by ID: $e');
+      return null;
+    }
+  }
+
+  // ========== FAVORITES MANAGEMENT ==========
+
+  /// Check if anime is in favorites
+  bool isFavorite(int malId) {
+    return _favorites.any((anime) => anime.malId == malId);
+  }
+
+  /// Toggle favorite status
+  Future<void> toggleFavorite(Anime anime) async {
+    try {
+      if (isFavorite(anime.malId)) {
+        await removeFavorite(anime.malId);
+        debugPrint('💔 Removed from favorites: ${anime.title}');
+      } else {
+        await addFavorite(anime);
+        debugPrint('❤️ Added to favorites: ${anime.title}');
+      }
+    } catch (e) {
+      debugPrint('❌ Error toggling favorite: $e');
+    }
+  }
+
+  /// Add anime to favorites
+  Future<void> addFavorite(Anime anime) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        await _firestoreService.addFavorite(user.uid, anime);
+      } catch (e) {
+        debugPrint('❌ Error adding favorite: $e');
+        rethrow;
+      }
+    } else {
+      debugPrint('⚠️ Cannot add favorite: User not authenticated');
+    }
+  }
+
+  /// Remove anime from favorites
+  Future<void> removeFavorite(int malId) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        await _firestoreService.removeFavorite(user.uid, malId);
+      } catch (e) {
+        debugPrint('❌ Error removing favorite: $e');
+        rethrow;
+      }
+    } else {
+      debugPrint('⚠️ Cannot remove favorite: User not authenticated');
+    }
   }
 
   /// Get favorites count
@@ -121,10 +240,20 @@ class AppStateProvider extends ChangeNotifier {
 
   // ========== SEARCH FUNCTIONALITY ==========
 
-  /// Set search query for HomeScreen
+  /// Set search query for HomeScreen (with debounced API search)
   void setHomeSearchQuery(String query) {
     _homeSearchQuery = query;
     notifyListeners();
+
+    _searchDebounce?.cancel();
+
+    _searchDebounce = Timer(const Duration(milliseconds: 800), () {
+      if (query.trim().isNotEmpty) {
+        searchAnimeFromAPI(query);
+      } else {
+        fetchTopAnime();
+      }
+    });
   }
 
   /// Set search query for FavoriteScreen
@@ -137,20 +266,20 @@ class AppStateProvider extends ChangeNotifier {
 
   /// Get filtered anime list for HomeScreen (based on genre and home search)
   List<Anime> getFilteredAnimeForHome() {
-    List<Anime> result = DummyData.animeList;
+    List<Anime> result = _animeList;
 
-    // Apply genre filter
     if (_selectedGenre != "All") {
       result = result.where((anime) {
-        final genres = anime.genre.split(',').map((g) => g.trim()).toList();
-        return genres.contains(_selectedGenre);
+        return anime.genres.any(
+                (genre) => genre.toLowerCase() == _selectedGenre.toLowerCase());
       }).toList();
     }
 
-    // Apply home search filter (case-insensitive)
     if (_homeSearchQuery.isNotEmpty) {
       result = result.where((anime) {
-        return anime.title.toLowerCase().contains(_homeSearchQuery.toLowerCase());
+        return anime.title
+            .toLowerCase()
+            .contains(_homeSearchQuery.toLowerCase());
       }).toList();
     }
 
@@ -161,13 +290,24 @@ class AppStateProvider extends ChangeNotifier {
   List<Anime> getFilteredFavorites() {
     List<Anime> result = _favorites;
 
-    // Apply favorite search filter (case-insensitive)
     if (_favoriteSearchQuery.isNotEmpty) {
       result = result.where((anime) {
-        return anime.title.toLowerCase().contains(_favoriteSearchQuery.toLowerCase());
+        return anime.title
+            .toLowerCase()
+            .contains(_favoriteSearchQuery.toLowerCase());
       }).toList();
     }
 
     return result;
+  }
+
+  @override
+  void dispose() {
+    debugPrint('🔄 Disposing AppStateProvider');
+    _favoritesSubscription?.cancel();
+    _authSubscription?.cancel();
+    _searchDebounce?.cancel();
+    _repository.dispose();
+    super.dispose();
   }
 }
