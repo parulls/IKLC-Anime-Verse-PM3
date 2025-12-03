@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "929186988196-ks457g1tdejstjr7vp8r5pj0b3j32fj3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.anime_verse",
+            "certificate_hash": "e1572c0a80c1526579d9597f585c9378e6c1009a"
+          }
+        },
+        {
           "client_id": "929186988196-mjmdmqgk680s3mn05ave7khs71f2061s.apps.googleusercontent.com",
           "client_type": 3
         }
