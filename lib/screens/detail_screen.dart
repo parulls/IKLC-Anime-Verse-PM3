@@ -37,30 +37,19 @@ class _DetailScreenState extends State<DetailScreen> {
     try {
       final appState = Provider.of<AppStateProvider>(context, listen: false);
       final malId = int.parse(widget.animeId);
-      
-      // Try to find in current list first
+
       final animeFromList = appState.animeList
           .where((a) => a.malId == malId)
           .firstOrNull;
-      
+
       if (animeFromList != null) {
-        print('🎬 Debug - Anime found in list:');
-        print('  Title: ${animeFromList.title}');
-        print('  Image URL: ${animeFromList.imageUrl}');
-        print('  Large Image URL: ${animeFromList.largeImageUrl}');
         setState(() {
           _anime = animeFromList;
           _isLoading = false;
         });
       } else {
-        // Fetch from API if not in list
-        print('⚠ Anime not in list, fetching from API...');
         final fetchedAnime = await appState.getAnimeById(malId);
         if (fetchedAnime != null) {
-          print('🎬 Debug - Anime fetched from API:');
-          print('  Title: ${fetchedAnime.title}');
-          print('  Image URL: ${fetchedAnime.imageUrl}');
-          print('  Large Image URL: ${fetchedAnime.largeImageUrl}');
         }
         setState(() {
           _anime = fetchedAnime;
@@ -80,7 +69,6 @@ class _DetailScreenState extends State<DetailScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
-    // Loading state
     if (_isLoading) {
       return AppScaffold(
         body: const Center(
@@ -99,7 +87,6 @@ class _DetailScreenState extends State<DetailScreen> {
       );
     }
 
-    // Error or not found state
     if (_errorMessage != null || _anime == null) {
       return AppScaffold(
         body: Center(
@@ -140,7 +127,6 @@ class _DetailScreenState extends State<DetailScreen> {
     return AppScaffold(
       body: CustomScrollView(
         slivers: [
-          // Header section with image and title
           SliverAppBar(
             floating: true,
             pinned: true,
@@ -171,44 +157,42 @@ class _DetailScreenState extends State<DetailScreen> {
               background: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Background image - use largeImageUrl or fallback to imageUrl
                   (anime.largeImageUrl ?? anime.imageUrl) != null
                       ? CachedNetworkImage(
-                          imageUrl: anime.largeImageUrl ?? anime.imageUrl ?? '',
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) => Container(
-                            color: Colors.black,
-                            child: const Center(
-                              child: CircularProgressIndicator(),
-                            ),
+                    imageUrl: anime.largeImageUrl ?? anime.imageUrl ?? '',
+                    fit: BoxFit.cover,
+                    placeholder: (context, url) => Container(
+                      color: Colors.black,
+                      child: const Center(
+                        child: CircularProgressIndicator(),
+                      ),
+                    ),
+                    errorWidget: (context, url, error) => Container(
+                      color: Colors.black,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.broken_image, size: 64, color: Colors.white38),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Failed to load image',
+                            style: TextStyle(color: Colors.white38),
                           ),
-                          errorWidget: (context, url, error) => Container(
-                            color: Colors.black,
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.broken_image, size: 64, color: Colors.white38),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Failed to load image',
-                                  style: TextStyle(color: Colors.white38),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
+                        ],
+                      ),
+                    ),
+                  )
                       : Container(
-                          color: Colors.black,
-                          child: const Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.image_not_supported, size: 64, color: Colors.white38),
-                              SizedBox(height: 8),
-                              Text('No image available', style: TextStyle(color: Colors.white38)),
-                            ],
-                          ),
-                        ),
-                  // Gradient overlay for better text visibility
+                    color: Colors.black,
+                    child: const Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.image_not_supported, size: 64, color: Colors.white38),
+                        SizedBox(height: 8),
+                        Text('No image available', style: TextStyle(color: Colors.white38)),
+                      ],
+                    ),
+                  ),
                   Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -275,13 +259,13 @@ class _DetailScreenState extends State<DetailScreen> {
                         Consumer<AppStateProvider>(
                           builder: (context, favoriteProvider, child) {
                             final isFavorite = favoriteProvider.isFavorite(anime.malId);
-                            
+
                             return Container(
                               margin: EdgeInsets.only(left: screenWidth * 0.03),
                               decoration: BoxDecoration(
-                                color: isFavorite 
-                                  ? Colors.red.withValues(alpha: 0.9)
-                                  : Colors.black.withValues(alpha: 0.5),
+                                color: isFavorite
+                                    ? Colors.red.withValues(alpha: 0.9)
+                                    : Colors.black.withValues(alpha: 0.5),
                                 shape: BoxShape.circle,
                                 boxShadow: [
                                   BoxShadow(
