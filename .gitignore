@@ -47,5 +47,6 @@ app.*.map.json
 # Google Services
 google-services.json
 local.properties
-*.keystore
-*.jks
+key.properties
+**/*.keystore
+**/*.jks
