@@ -112,7 +112,7 @@ Follow these steps to run the project locally.
 
 ### 1. Clone the Repository
 ```bash
-git clone [https://github.com/parulls/IKLC-Anime-Verse-PM3.git]
+git clone "https://github.com/parulls/IKLC-Anime-Verse-PM3.git"
 ```
 
 #### 2. Install Dependencies
